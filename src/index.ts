@@ -242,6 +242,329 @@ const tools: Tool[] = [
       required: ["to", "subject", "body"],
     },
   },
+  {
+    name: "gmail_list_drafts",
+    description: "List all draft emails",
+    inputSchema: {
+      type: "object",
+      properties: {
+        maxResults: {
+          type: "number",
+          description: "Maximum number of drafts to return (default: 10)",
+        },
+      },
+    },
+  },
+  {
+    name: "gmail_get_draft",
+    description: "Get a specific draft by ID",
+    inputSchema: {
+      type: "object",
+      properties: {
+        draftId: {
+          type: "string",
+          description: "The ID of the draft to retrieve",
+        },
+      },
+      required: ["draftId"],
+    },
+  },
+  {
+    name: "gmail_update_draft",
+    description: "Update an existing draft",
+    inputSchema: {
+      type: "object",
+      properties: {
+        draftId: {
+          type: "string",
+          description: "The ID of the draft to update",
+        },
+        to: {
+          type: "string",
+          description: "Recipient email address",
+        },
+        subject: {
+          type: "string",
+          description: "Email subject",
+        },
+        body: {
+          type: "string",
+          description: "Email body (plain text)",
+        },
+      },
+      required: ["draftId", "to", "subject", "body"],
+    },
+  },
+  {
+    name: "gmail_send_draft",
+    description: "Send an existing draft",
+    inputSchema: {
+      type: "object",
+      properties: {
+        draftId: {
+          type: "string",
+          description: "The ID of the draft to send",
+        },
+      },
+      required: ["draftId"],
+    },
+  },
+  {
+    name: "gmail_delete_draft",
+    description: "Delete a draft permanently",
+    inputSchema: {
+      type: "object",
+      properties: {
+        draftId: {
+          type: "string",
+          description: "The ID of the draft to delete",
+        },
+      },
+      required: ["draftId"],
+    },
+  },
+  {
+    name: "gmail_get_attachment",
+    description: "Get attachment metadata and content from a message",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message containing the attachment",
+        },
+        attachmentId: {
+          type: "string",
+          description: "The ID of the attachment",
+        },
+      },
+      required: ["messageId", "attachmentId"],
+    },
+  },
+  {
+    name: "gmail_list_attachments",
+    description: "List all attachments in a message",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message",
+        },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
+    name: "gmail_archive_message",
+    description: "Archive a message (remove from inbox)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to archive",
+        },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
+    name: "gmail_unarchive_message",
+    description: "Unarchive a message (move back to inbox)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to unarchive",
+        },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
+    name: "gmail_untrash_message",
+    description: "Remove a message from trash",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to untrash",
+        },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
+    name: "gmail_delete_message",
+    description: "Permanently delete a message (cannot be undone)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to delete permanently",
+        },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
+    name: "gmail_create_label",
+    description: "Create a new label",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "The name of the label",
+        },
+        labelListVisibility: {
+          type: "string",
+          enum: ["labelShow", "labelShowIfUnread", "labelHide"],
+          description: "Visibility in label list (default: labelShow)",
+        },
+        messageListVisibility: {
+          type: "string",
+          enum: ["show", "hide"],
+          description: "Visibility in message list (default: show)",
+        },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "gmail_update_label",
+    description: "Update an existing label",
+    inputSchema: {
+      type: "object",
+      properties: {
+        labelId: {
+          type: "string",
+          description: "The ID of the label to update",
+        },
+        name: {
+          type: "string",
+          description: "New name for the label",
+        },
+      },
+      required: ["labelId", "name"],
+    },
+  },
+  {
+    name: "gmail_delete_label",
+    description: "Delete a label",
+    inputSchema: {
+      type: "object",
+      properties: {
+        labelId: {
+          type: "string",
+          description: "The ID of the label to delete",
+        },
+      },
+      required: ["labelId"],
+    },
+  },
+  {
+    name: "gmail_get_profile",
+    description: "Get the user's Gmail profile (email address, etc.)",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "gmail_forward_message",
+    description: "Forward an email to another recipient",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to forward",
+        },
+        to: {
+          type: "string",
+          description: "Recipient email address",
+        },
+        additionalMessage: {
+          type: "string",
+          description: "Additional message to include (optional)",
+        },
+      },
+      required: ["messageId", "to"],
+    },
+  },
+  {
+    name: "gmail_star_message",
+    description: "Star a message",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to star",
+        },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
+    name: "gmail_unstar_message",
+    description: "Remove star from a message",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to unstar",
+        },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
+    name: "gmail_batch_modify",
+    description: "Modify labels on multiple messages at once",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of message IDs to modify",
+        },
+        addLabelIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Label IDs to add",
+        },
+        removeLabelIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Label IDs to remove",
+        },
+      },
+      required: ["messageIds"],
+    },
+  },
+  {
+    name: "gmail_batch_delete",
+    description: "Permanently delete multiple messages at once",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of message IDs to delete",
+        },
+      },
+      required: ["messageIds"],
+    },
+  },
 ];
 
 class GmailMCPServer {
@@ -381,6 +704,46 @@ class GmailMCPServer {
             return await this.replyToMessage(args);
           case "gmail_create_draft":
             return await this.createDraft(args);
+          case "gmail_list_drafts":
+            return await this.listDrafts(args);
+          case "gmail_get_draft":
+            return await this.getDraft(args);
+          case "gmail_update_draft":
+            return await this.updateDraft(args);
+          case "gmail_send_draft":
+            return await this.sendDraft(args);
+          case "gmail_delete_draft":
+            return await this.deleteDraft(args);
+          case "gmail_get_attachment":
+            return await this.getAttachment(args);
+          case "gmail_list_attachments":
+            return await this.listAttachments(args);
+          case "gmail_archive_message":
+            return await this.archiveMessage(args);
+          case "gmail_unarchive_message":
+            return await this.unarchiveMessage(args);
+          case "gmail_untrash_message":
+            return await this.untrashMessage(args);
+          case "gmail_delete_message":
+            return await this.deleteMessage(args);
+          case "gmail_create_label":
+            return await this.createLabel(args);
+          case "gmail_update_label":
+            return await this.updateLabel(args);
+          case "gmail_delete_label":
+            return await this.deleteLabel(args);
+          case "gmail_get_profile":
+            return await this.getProfile();
+          case "gmail_forward_message":
+            return await this.forwardMessage(args);
+          case "gmail_star_message":
+            return await this.starMessage(args);
+          case "gmail_unstar_message":
+            return await this.unstarMessage(args);
+          case "gmail_batch_modify":
+            return await this.batchModify(args);
+          case "gmail_batch_delete":
+            return await this.batchDelete(args);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -655,6 +1018,410 @@ class GmailMCPServer {
         {
           type: "text",
           text: JSON.stringify({ success: true, draftId: response.data.id }, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async listDrafts(args: Record<string, unknown>) {
+    const maxResults = (args.maxResults as number) || 10;
+
+    const response = await this.gmail!.users.drafts.list({
+      userId: "me",
+      maxResults,
+    });
+
+    const drafts = response.data.drafts || [];
+    const results = [];
+
+    for (const draft of drafts) {
+      const details = await this.gmail!.users.drafts.get({
+        userId: "me",
+        id: draft.id!,
+        format: "metadata",
+      });
+
+      const headers = details.data.message?.payload?.headers;
+      results.push({
+        id: draft.id,
+        messageId: details.data.message?.id,
+        to: this.getHeader(headers, "To"),
+        subject: this.getHeader(headers, "Subject"),
+        snippet: details.data.message?.snippet,
+      });
+    }
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+    };
+  }
+
+  private async getDraft(args: Record<string, unknown>) {
+    const draftId = args.draftId as string;
+
+    const response = await this.gmail!.users.drafts.get({
+      userId: "me",
+      id: draftId,
+      format: "full",
+    });
+
+    const draft = response.data;
+    const headers = draft.message?.payload?.headers;
+    const body = this.getMessageBody(draft.message?.payload);
+
+    const result = {
+      id: draft.id,
+      messageId: draft.message?.id,
+      to: this.getHeader(headers, "To"),
+      cc: this.getHeader(headers, "Cc"),
+      subject: this.getHeader(headers, "Subject"),
+      body,
+    };
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  }
+
+  private async updateDraft(args: Record<string, unknown>) {
+    const draftId = args.draftId as string;
+    const to = args.to as string;
+    const subject = args.subject as string;
+    const body = args.body as string;
+
+    const raw = this.createRawMessage(to, subject, body);
+
+    const response = await this.gmail!.users.drafts.update({
+      userId: "me",
+      id: draftId,
+      requestBody: {
+        message: { raw },
+      },
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ success: true, draftId: response.data.id }, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async sendDraft(args: Record<string, unknown>) {
+    const draftId = args.draftId as string;
+
+    const response = await this.gmail!.users.drafts.send({
+      userId: "me",
+      requestBody: {
+        id: draftId,
+      },
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ success: true, messageId: response.data.id }, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async deleteDraft(args: Record<string, unknown>) {
+    const draftId = args.draftId as string;
+
+    await this.gmail!.users.drafts.delete({
+      userId: "me",
+      id: draftId,
+    });
+
+    return {
+      content: [{ type: "text", text: JSON.stringify({ success: true, draftId }, null, 2) }],
+    };
+  }
+
+  private getAttachments(payload: gmail_v1.Schema$MessagePart | undefined): Array<{ id: string; filename: string; mimeType: string; size: number }> {
+    const attachments: Array<{ id: string; filename: string; mimeType: string; size: number }> = [];
+
+    if (!payload) return attachments;
+
+    if (payload.body?.attachmentId && payload.filename) {
+      attachments.push({
+        id: payload.body.attachmentId,
+        filename: payload.filename,
+        mimeType: payload.mimeType || "application/octet-stream",
+        size: payload.body.size || 0,
+      });
+    }
+
+    if (payload.parts) {
+      for (const part of payload.parts) {
+        attachments.push(...this.getAttachments(part));
+      }
+    }
+
+    return attachments;
+  }
+
+  private async listAttachments(args: Record<string, unknown>) {
+    const messageId = args.messageId as string;
+
+    const response = await this.gmail!.users.messages.get({
+      userId: "me",
+      id: messageId,
+      format: "full",
+    });
+
+    const attachments = this.getAttachments(response.data.payload);
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(attachments, null, 2) }],
+    };
+  }
+
+  private async getAttachment(args: Record<string, unknown>) {
+    const messageId = args.messageId as string;
+    const attachmentId = args.attachmentId as string;
+
+    const response = await this.gmail!.users.messages.attachments.get({
+      userId: "me",
+      messageId,
+      id: attachmentId,
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            attachmentId,
+            size: response.data.size,
+            data: response.data.data, // base64 encoded
+          }, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async archiveMessage(args: Record<string, unknown>) {
+    return await this.modifyLabels({
+      messageId: args.messageId,
+      removeLabelIds: ["INBOX"],
+    });
+  }
+
+  private async unarchiveMessage(args: Record<string, unknown>) {
+    return await this.modifyLabels({
+      messageId: args.messageId,
+      addLabelIds: ["INBOX"],
+    });
+  }
+
+  private async untrashMessage(args: Record<string, unknown>) {
+    const messageId = args.messageId as string;
+
+    await this.gmail!.users.messages.untrash({
+      userId: "me",
+      id: messageId,
+    });
+
+    return {
+      content: [{ type: "text", text: JSON.stringify({ success: true, messageId }, null, 2) }],
+    };
+  }
+
+  private async deleteMessage(args: Record<string, unknown>) {
+    const messageId = args.messageId as string;
+
+    await this.gmail!.users.messages.delete({
+      userId: "me",
+      id: messageId,
+    });
+
+    return {
+      content: [{ type: "text", text: JSON.stringify({ success: true, messageId, deleted: true }, null, 2) }],
+    };
+  }
+
+  private async createLabel(args: Record<string, unknown>) {
+    const name = args.name as string;
+    const labelListVisibility = (args.labelListVisibility as string) || "labelShow";
+    const messageListVisibility = (args.messageListVisibility as string) || "show";
+
+    const response = await this.gmail!.users.labels.create({
+      userId: "me",
+      requestBody: {
+        name,
+        labelListVisibility,
+        messageListVisibility,
+      },
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            labelId: response.data.id,
+            name: response.data.name,
+          }, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async updateLabel(args: Record<string, unknown>) {
+    const labelId = args.labelId as string;
+    const name = args.name as string;
+
+    const response = await this.gmail!.users.labels.update({
+      userId: "me",
+      id: labelId,
+      requestBody: {
+        name,
+      },
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            labelId: response.data.id,
+            name: response.data.name,
+          }, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async deleteLabel(args: Record<string, unknown>) {
+    const labelId = args.labelId as string;
+
+    await this.gmail!.users.labels.delete({
+      userId: "me",
+      id: labelId,
+    });
+
+    return {
+      content: [{ type: "text", text: JSON.stringify({ success: true, labelId, deleted: true }, null, 2) }],
+    };
+  }
+
+  private async getProfile() {
+    const response = await this.gmail!.users.getProfile({
+      userId: "me",
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            emailAddress: response.data.emailAddress,
+            messagesTotal: response.data.messagesTotal,
+            threadsTotal: response.data.threadsTotal,
+            historyId: response.data.historyId,
+          }, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async forwardMessage(args: Record<string, unknown>) {
+    const messageId = args.messageId as string;
+    const to = args.to as string;
+    const additionalMessage = args.additionalMessage as string | undefined;
+
+    const original = await this.gmail!.users.messages.get({
+      userId: "me",
+      id: messageId,
+      format: "full",
+    });
+
+    const headers = original.data.payload?.headers;
+    const subject = this.getHeader(headers, "Subject");
+    const originalFrom = this.getHeader(headers, "From");
+    const originalDate = this.getHeader(headers, "Date");
+    const originalBody = this.getMessageBody(original.data.payload);
+
+    const forwardSubject = subject.startsWith("Fwd:") ? subject : `Fwd: ${subject}`;
+    const forwardBody = `${additionalMessage ? additionalMessage + "\n\n" : ""}---------- Forwarded message ----------\nFrom: ${originalFrom}\nDate: ${originalDate}\nSubject: ${subject}\n\n${originalBody}`;
+
+    const raw = this.createRawMessage(to, forwardSubject, forwardBody);
+
+    const response = await this.gmail!.users.messages.send({
+      userId: "me",
+      requestBody: { raw },
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ success: true, messageId: response.data.id }, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async starMessage(args: Record<string, unknown>) {
+    return await this.modifyLabels({
+      messageId: args.messageId,
+      addLabelIds: ["STARRED"],
+    });
+  }
+
+  private async unstarMessage(args: Record<string, unknown>) {
+    return await this.modifyLabels({
+      messageId: args.messageId,
+      removeLabelIds: ["STARRED"],
+    });
+  }
+
+  private async batchModify(args: Record<string, unknown>) {
+    const messageIds = args.messageIds as string[];
+    const addLabelIds = args.addLabelIds as string[] | undefined;
+    const removeLabelIds = args.removeLabelIds as string[] | undefined;
+
+    await this.gmail!.users.messages.batchModify({
+      userId: "me",
+      requestBody: {
+        ids: messageIds,
+        addLabelIds,
+        removeLabelIds,
+      },
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ success: true, modifiedCount: messageIds.length }, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async batchDelete(args: Record<string, unknown>) {
+    const messageIds = args.messageIds as string[];
+
+    await this.gmail!.users.messages.batchDelete({
+      userId: "me",
+      requestBody: {
+        ids: messageIds,
+      },
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ success: true, deletedCount: messageIds.length }, null, 2),
         },
       ],
     };
