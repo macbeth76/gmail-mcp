@@ -7,17 +7,19 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { google, gmail_v1 } from "googleapis";
+import { google, gmail_v1, drive_v3 } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import * as fs from "fs";
 import * as path from "path";
 
-// Gmail scopes required
+// Gmail and Drive/Photos scopes required
 const SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.send",
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.labels",
+  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/drive.photos.readonly",
 ];
 
 // Paths for credentials
@@ -565,12 +567,173 @@ const tools: Tool[] = [
       required: ["messageIds"],
     },
   },
+  // Google Photos tools
+  {
+    name: "photos_list_albums",
+    description: "List all albums in Google Photos",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pageSize: {
+          type: "number",
+          description: "Maximum number of albums to return (default: 20, max: 50)",
+        },
+        pageToken: {
+          type: "string",
+          description: "Token for pagination",
+        },
+      },
+    },
+  },
+  {
+    name: "photos_get_album",
+    description: "Get details of a specific album",
+    inputSchema: {
+      type: "object",
+      properties: {
+        albumId: {
+          type: "string",
+          description: "The ID of the album",
+        },
+      },
+      required: ["albumId"],
+    },
+  },
+  {
+    name: "photos_list_media",
+    description: "List media items (photos/videos) in Google Photos",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pageSize: {
+          type: "number",
+          description: "Maximum number of items to return (default: 25, max: 100)",
+        },
+        pageToken: {
+          type: "string",
+          description: "Token for pagination",
+        },
+        albumId: {
+          type: "string",
+          description: "Filter by album ID (optional)",
+        },
+      },
+    },
+  },
+  {
+    name: "photos_get_media",
+    description: "Get details of a specific media item",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mediaItemId: {
+          type: "string",
+          description: "The ID of the media item",
+        },
+      },
+      required: ["mediaItemId"],
+    },
+  },
+  {
+    name: "photos_search",
+    description: "Search for photos and videos by filename or content",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pageSize: {
+          type: "number",
+          description: "Maximum number of items to return (default: 25)",
+        },
+        query: {
+          type: "string",
+          description: "Search query to find in filenames",
+        },
+        mimeType: {
+          type: "string",
+          description: "Filter by mime type (e.g., 'image/jpeg', 'video/mp4')",
+        },
+      },
+    },
+  },
+  {
+    name: "photos_create_album",
+    description: "Create a new album",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Title of the album",
+        },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "photos_add_to_album",
+    description: "Add media items to an album",
+    inputSchema: {
+      type: "object",
+      properties: {
+        albumId: {
+          type: "string",
+          description: "The ID of the album",
+        },
+        mediaItemIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of media item IDs to add",
+        },
+      },
+      required: ["albumId", "mediaItemIds"],
+    },
+  },
+  {
+    name: "photos_share_album",
+    description: "Share an album and get a shareable link",
+    inputSchema: {
+      type: "object",
+      properties: {
+        albumId: {
+          type: "string",
+          description: "The ID of the album to share",
+        },
+        isCollaborative: {
+          type: "boolean",
+          description: "Allow others to add photos (default: false)",
+        },
+        isCommentable: {
+          type: "boolean",
+          description: "Allow comments (default: true)",
+        },
+      },
+      required: ["albumId"],
+    },
+  },
+  {
+    name: "photos_list_shared_albums",
+    description: "List albums shared with you",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pageSize: {
+          type: "number",
+          description: "Maximum number of albums to return (default: 20)",
+        },
+        pageToken: {
+          type: "string",
+          description: "Token for pagination",
+        },
+      },
+    },
+  },
 ];
 
 class GmailMCPServer {
   private server: Server;
   private oauth2Client: OAuth2Client | null = null;
   private gmail: gmail_v1.Gmail | null = null;
+  private drive: drive_v3.Drive | null = null;
 
   constructor() {
     this.server = new Server(
@@ -612,6 +775,7 @@ class GmailMCPServer {
     }
 
     this.gmail = google.gmail({ version: "v1", auth: this.oauth2Client });
+    this.drive = google.drive({ version: "v3", auth: this.oauth2Client });
   }
 
   private getHeader(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string {
@@ -744,6 +908,25 @@ class GmailMCPServer {
             return await this.batchModify(args);
           case "gmail_batch_delete":
             return await this.batchDelete(args);
+          // Google Photos cases
+          case "photos_list_albums":
+            return await this.photosListAlbums(args);
+          case "photos_get_album":
+            return await this.photosGetAlbum(args);
+          case "photos_list_media":
+            return await this.photosListMedia(args);
+          case "photos_get_media":
+            return await this.photosGetMedia(args);
+          case "photos_search":
+            return await this.photosSearch(args);
+          case "photos_create_album":
+            return await this.photosCreateAlbum(args);
+          case "photos_add_to_album":
+            return await this.photosAddToAlbum(args);
+          case "photos_share_album":
+            return await this.photosShareAlbum(args);
+          case "photos_list_shared_albums":
+            return await this.photosListSharedAlbums(args);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -1424,6 +1607,268 @@ class GmailMCPServer {
           text: JSON.stringify({ success: true, deletedCount: messageIds.length }, null, 2),
         },
       ],
+    };
+  }
+
+  // Google Photos via Drive API - photos are stored in Drive
+  private async photosListAlbums(args: Record<string, unknown>) {
+    const pageSize = (args.pageSize as number) || 20;
+    const pageToken = args.pageToken as string | undefined;
+
+    // Find folders in Google Photos space
+    const response = await this.drive!.files.list({
+      q: "mimeType='application/vnd.google-apps.folder' and 'root' in parents",
+      pageSize,
+      pageToken,
+      fields: "nextPageToken, files(id, name, createdTime, modifiedTime)",
+          });
+
+    const albums = response.data.files?.map((folder) => ({
+      id: folder.id,
+      title: folder.name,
+      createdTime: folder.createdTime,
+      modifiedTime: folder.modifiedTime,
+    })) || [];
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ albums, nextPageToken: response.data.nextPageToken }, null, 2),
+      }],
+    };
+  }
+
+  private async photosGetAlbum(args: Record<string, unknown>) {
+    const albumId = args.albumId as string;
+
+    const response = await this.drive!.files.get({
+      fileId: albumId,
+      fields: "id, name, createdTime, modifiedTime, webViewLink",
+    });
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          id: response.data.id,
+          title: response.data.name,
+          createdTime: response.data.createdTime,
+          modifiedTime: response.data.modifiedTime,
+          webViewLink: response.data.webViewLink,
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async photosListMedia(args: Record<string, unknown>) {
+    const pageSize = (args.pageSize as number) || 25;
+    const pageToken = args.pageToken as string | undefined;
+    const folderId = args.albumId as string | undefined;
+
+    let query = "(mimeType contains 'image/' or mimeType contains 'video/')";
+    if (folderId) {
+      query += ` and '${folderId}' in parents`;
+    }
+
+    const response = await this.drive!.files.list({
+      q: query,
+      pageSize,
+      pageToken,
+      fields: "nextPageToken, files(id, name, mimeType, createdTime, modifiedTime, size, thumbnailLink, webContentLink, imageMediaMetadata, videoMediaMetadata)",
+            orderBy: "createdTime desc",
+    });
+
+    const items = response.data.files?.map((file) => ({
+      id: file.id,
+      filename: file.name,
+      mimeType: file.mimeType,
+      createdTime: file.createdTime,
+      modifiedTime: file.modifiedTime,
+      size: file.size,
+      thumbnailLink: file.thumbnailLink,
+      webContentLink: file.webContentLink,
+      imageMetadata: file.imageMediaMetadata,
+      videoMetadata: file.videoMediaMetadata,
+    })) || [];
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ mediaItems: items, nextPageToken: response.data.nextPageToken }, null, 2),
+      }],
+    };
+  }
+
+  private async photosGetMedia(args: Record<string, unknown>) {
+    const mediaItemId = args.mediaItemId as string;
+
+    const response = await this.drive!.files.get({
+      fileId: mediaItemId,
+      fields: "id, name, mimeType, createdTime, modifiedTime, size, thumbnailLink, webContentLink, webViewLink, imageMediaMetadata, videoMediaMetadata",
+    });
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          id: response.data.id,
+          filename: response.data.name,
+          mimeType: response.data.mimeType,
+          createdTime: response.data.createdTime,
+          size: response.data.size,
+          thumbnailLink: response.data.thumbnailLink,
+          webContentLink: response.data.webContentLink,
+          webViewLink: response.data.webViewLink,
+          imageMetadata: response.data.imageMediaMetadata,
+          videoMetadata: response.data.videoMediaMetadata,
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async photosSearch(args: Record<string, unknown>) {
+    const pageSize = (args.pageSize as number) || 25;
+    const query = args.query as string | undefined;
+    const mimeType = args.mimeType as string | undefined;
+
+    let q = "(mimeType contains 'image/' or mimeType contains 'video/')";
+    if (query) {
+      q += ` and fullText contains '${query}'`;
+    }
+    if (mimeType) {
+      q = `mimeType contains '${mimeType}'`;
+    }
+
+    const response = await this.drive!.files.list({
+      q,
+      pageSize,
+      fields: "nextPageToken, files(id, name, mimeType, createdTime, thumbnailLink, webViewLink)",
+            orderBy: "createdTime desc",
+    });
+
+    const items = response.data.files?.map((file) => ({
+      id: file.id,
+      filename: file.name,
+      mimeType: file.mimeType,
+      createdTime: file.createdTime,
+      thumbnailLink: file.thumbnailLink,
+      webViewLink: file.webViewLink,
+    })) || [];
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ mediaItems: items, nextPageToken: response.data.nextPageToken }, null, 2),
+      }],
+    };
+  }
+
+  private async photosCreateAlbum(args: Record<string, unknown>) {
+    const title = args.title as string;
+
+    const response = await this.drive!.files.create({
+      requestBody: {
+        name: title,
+        mimeType: "application/vnd.google-apps.folder",
+      },
+      fields: "id, name, webViewLink",
+    });
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          success: true,
+          id: response.data.id,
+          title: response.data.name,
+          webViewLink: response.data.webViewLink,
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async photosAddToAlbum(args: Record<string, unknown>) {
+    const albumId = args.albumId as string;
+    const mediaItemIds = args.mediaItemIds as string[];
+
+    const results = [];
+    for (const fileId of mediaItemIds) {
+      // Get current parents
+      const file = await this.drive!.files.get({
+        fileId,
+        fields: "parents",
+      });
+
+      // Add to new folder
+      await this.drive!.files.update({
+        fileId,
+        addParents: albumId,
+        fields: "id, parents",
+      });
+      results.push(fileId);
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ success: true, albumId, addedCount: results.length }, null, 2),
+      }],
+    };
+  }
+
+  private async photosShareAlbum(args: Record<string, unknown>) {
+    const albumId = args.albumId as string;
+
+    // Create a permission for anyone with link
+    await this.drive!.permissions.create({
+      fileId: albumId,
+      requestBody: {
+        role: "reader",
+        type: "anyone",
+      },
+    });
+
+    // Get the web view link
+    const file = await this.drive!.files.get({
+      fileId: albumId,
+      fields: "webViewLink",
+    });
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          success: true,
+          shareUrl: file.data.webViewLink,
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async photosListSharedAlbums(args: Record<string, unknown>) {
+    const pageSize = (args.pageSize as number) || 20;
+    const pageToken = args.pageToken as string | undefined;
+
+    const response = await this.drive!.files.list({
+      q: "mimeType='application/vnd.google-apps.folder' and sharedWithMe=true",
+      pageSize,
+      pageToken,
+      fields: "nextPageToken, files(id, name, createdTime, webViewLink, sharingUser)",
+    });
+
+    const albums = response.data.files?.map((folder) => ({
+      id: folder.id,
+      title: folder.name,
+      createdTime: folder.createdTime,
+      webViewLink: folder.webViewLink,
+      sharedBy: folder.sharingUser,
+    })) || [];
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ albums, nextPageToken: response.data.nextPageToken }, null, 2),
+      }],
     };
   }
 
