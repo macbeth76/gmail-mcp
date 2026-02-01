@@ -2,29 +2,64 @@
 
 [![CI](https://github.com/macbeth76/gmail-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/macbeth76/gmail-mcp/actions/workflows/ci.yml)
 
-A Model Context Protocol (MCP) server for Gmail integration. This server allows AI assistants like Claude to interact with Gmail for reading, sending, and managing emails.
+A Model Context Protocol (MCP) server for Gmail, Google Photos, and Video analysis. This server allows AI assistants like Claude to interact with your email, photos, and analyze videos locally.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         MCP CLIENT                               │
+│                (Claude Desktop, IDE, CLI, etc.)                  │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                │ JSON-RPC over stdio
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      GMAIL MCP SERVER                            │
+│                                                                  │
+│    ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐     │
+│    │    GMAIL     │  │    PHOTOS    │  │      VIDEO       │     │
+│    │   32 tools   │  │   9 tools    │  │     6 tools      │     │
+│    └──────┬───────┘  └──────┬───────┘  └────────┬─────────┘     │
+│           │                 │                   │                │
+└───────────┼─────────────────┼───────────────────┼────────────────┘
+            │                 │                   │
+            ▼                 ▼                   ▼
+     ┌────────────┐    ┌────────────┐    ┌─────────────────┐
+     │ Gmail API  │    │ Drive API  │    │  Local Tools    │
+     │            │    │  (Photos)  │    │ FFmpeg, Ollama, │
+     │            │    │            │    │ Whisper-cpp     │
+     └────────────┘    └────────────┘    └─────────────────┘
+```
 
 ## Features
 
-- List and search emails
+### Gmail (32 tools)
+- List and search emails with Gmail query syntax
 - Read email content with attachments
-- Send new emails and replies
-- Forward emails
+- Send new emails, replies, and forwards
 - Create, edit, and send drafts
 - Manage labels (create, update, delete)
 - Mark as read/unread, star/unstar
 - Archive and trash messages
 - Batch operations for bulk actions
-- Get email threads
 - Download attachments
 
+### Google Photos (9 tools)
+- List and search photos/videos
+- Browse albums (personal and shared)
+- Create albums and add media
+- Share albums with others
+- Access media metadata
+
+### Video Analysis (6 tools)
+- Get video metadata (duration, resolution, codec)
+- Extract frames at specific timestamps
+- Analyze video content using AI vision (Ollama + LLaVA)
+- Transcribe audio using Whisper
+- Generate video summaries
+
 ## Installation
-
-```bash
-npm install gmail-mcp-server
-```
-
-Or install from source:
 
 ```bash
 git clone https://github.com/macbeth76/gmail-mcp.git
@@ -33,35 +68,54 @@ npm install
 npm run build
 ```
 
+### Optional Dependencies for Video Analysis
+
+```bash
+# FFmpeg for video processing
+brew install ffmpeg
+
+# Ollama for AI vision analysis
+brew install ollama
+ollama pull llava
+
+# Whisper for transcription
+brew install whisper-cpp
+```
+
 ## Setup
 
 ### 1. Create Google Cloud OAuth Credentials
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project or select an existing one
-3. Enable the Gmail API:
+3. Enable the required APIs:
    - Navigate to "APIs & Services" > "Library"
-   - Search for "Gmail API" and enable it
-4. Create OAuth2 credentials:
+   - Enable **Gmail API**
+   - Enable **Google Drive API** (for Photos access)
+4. Configure OAuth consent screen:
+   - Go to "APIs & Services" > "OAuth consent screen"
+   - Add scopes: `gmail.readonly`, `gmail.send`, `gmail.modify`, `gmail.labels`, `drive.readonly`, `drive.photos.readonly`
+   - Add yourself as a test user
+5. Create OAuth2 credentials:
    - Go to "APIs & Services" > "Credentials"
    - Click "Create Credentials" > "OAuth client ID"
    - Select "Desktop app" as the application type
    - Download the JSON file
-5. Save the credentials file as `~/.gmail-mcp/credentials.json`
+6. Save the credentials file as `~/.gmail-mcp/credentials.json`
 
 ### 2. Authenticate
-
-Run the authentication helper:
 
 ```bash
 npm run auth
 ```
 
-This will open a browser window for OAuth authentication and save the token to `~/.gmail-mcp/token.json`.
+This opens a browser for OAuth authentication and saves the token to `~/.gmail-mcp/token.json`.
 
-## Usage with Claude Code
+## Usage with Claude
 
-Add to your Claude Code MCP configuration (`~/.claude/claude_desktop_config.json`):
+Add to your Claude MCP configuration:
+
+**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 
 ```json
 {
@@ -74,9 +128,22 @@ Add to your Claude Code MCP configuration (`~/.claude/claude_desktop_config.json
 }
 ```
 
-## Available Tools
+**Claude Code** (`~/.claude.json`):
 
-### Messages
+```json
+{
+  "mcpServers": {
+    "gmail": {
+      "command": "node",
+      "args": ["/path/to/gmail-mcp/dist/index.js"]
+    }
+  }
+}
+```
+
+## Available Tools (47 total)
+
+### Gmail Messages
 
 | Tool | Description |
 |------|-------------|
@@ -88,7 +155,7 @@ Add to your Claude Code MCP configuration (`~/.claude/claude_desktop_config.json
 | `gmail_forward_message` | Forward an email to another recipient |
 | `gmail_get_thread` | Get all messages in a thread |
 
-### Message Actions
+### Gmail Message Actions
 
 | Tool | Description |
 |------|-------------|
@@ -102,7 +169,7 @@ Add to your Claude Code MCP configuration (`~/.claude/claude_desktop_config.json
 | `gmail_untrash_message` | Remove email from trash |
 | `gmail_delete_message` | Permanently delete a message |
 
-### Drafts
+### Gmail Drafts
 
 | Tool | Description |
 |------|-------------|
@@ -113,7 +180,7 @@ Add to your Claude Code MCP configuration (`~/.claude/claude_desktop_config.json
 | `gmail_send_draft` | Send an existing draft |
 | `gmail_delete_draft` | Delete a draft permanently |
 
-### Labels
+### Gmail Labels
 
 | Tool | Description |
 |------|-------------|
@@ -123,25 +190,50 @@ Add to your Claude Code MCP configuration (`~/.claude/claude_desktop_config.json
 | `gmail_update_label` | Update an existing label |
 | `gmail_delete_label` | Delete a label |
 
-### Attachments
+### Gmail Attachments
 
 | Tool | Description |
 |------|-------------|
 | `gmail_list_attachments` | List all attachments in a message |
 | `gmail_get_attachment` | Get attachment content (base64 encoded) |
 
-### Batch Operations
+### Gmail Batch Operations
 
 | Tool | Description |
 |------|-------------|
 | `gmail_batch_modify` | Modify labels on multiple messages at once |
 | `gmail_batch_delete` | Permanently delete multiple messages at once |
 
-### Profile
+### Gmail Profile
 
 | Tool | Description |
 |------|-------------|
-| `gmail_get_profile` | Get the user's Gmail profile (email address, etc.) |
+| `gmail_get_profile` | Get the user's Gmail profile |
+
+### Google Photos
+
+| Tool | Description |
+|------|-------------|
+| `photos_list_albums` | List all photo albums |
+| `photos_get_album` | Get details of a specific album |
+| `photos_list_media` | List photos/videos (optionally by album) |
+| `photos_get_media` | Get details of a specific media item |
+| `photos_search` | Search photos by date range or content type |
+| `photos_create_album` | Create a new album |
+| `photos_add_to_album` | Add media items to an album |
+| `photos_share_album` | Share an album |
+| `photos_list_shared_albums` | List albums shared with you |
+
+### Video Analysis
+
+| Tool | Description |
+|------|-------------|
+| `video_get_info` | Get video metadata (duration, resolution, codec) |
+| `video_extract_frame` | Extract a frame at a specific timestamp |
+| `video_analyze` | Analyze video using Ollama LLaVA vision model |
+| `video_analyze_frame` | Analyze a specific frame with custom prompt |
+| `video_transcribe` | Transcribe audio using Whisper-cpp |
+| `video_summarize` | Generate summary using transcription + AI |
 
 ## Environment Variables
 
