@@ -11,6 +11,10 @@ import { google, gmail_v1, drive_v3 } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import * as fs from "fs";
 import * as path from "path";
+import { exec, execSync } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 // Gmail and Drive/Photos scopes required
 const SCOPES = [
@@ -727,6 +731,96 @@ const tools: Tool[] = [
       },
     },
   },
+  // Video Analysis Tools (Ollama + FFmpeg)
+  {
+    name: "video_get_info",
+    description: "Get video metadata (duration, resolution, codec, etc.) using FFmpeg",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Local path to the video file",
+        },
+        driveFileId: {
+          type: "string",
+          description: "Google Drive file ID (will download temporarily)",
+        },
+      },
+    },
+  },
+  {
+    name: "video_extract_frame",
+    description: "Extract a frame from a video at a specific timestamp",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Local path to the video file",
+        },
+        driveFileId: {
+          type: "string",
+          description: "Google Drive file ID (will download temporarily)",
+        },
+        timestamp: {
+          type: "string",
+          description: "Timestamp to extract frame (e.g., '00:00:05' or '5' for 5 seconds)",
+        },
+      },
+    },
+  },
+  {
+    name: "video_analyze",
+    description: "Analyze a video using Ollama LLaVA - extracts frames and describes content",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Local path to the video file",
+        },
+        driveFileId: {
+          type: "string",
+          description: "Google Drive file ID (will download temporarily)",
+        },
+        prompt: {
+          type: "string",
+          description: "What to analyze (default: 'Describe what you see in this video frame')",
+        },
+        frameCount: {
+          type: "number",
+          description: "Number of frames to analyze (default: 3 - start, middle, end)",
+        },
+        model: {
+          type: "string",
+          description: "Ollama model to use (default: 'llava')",
+        },
+      },
+    },
+  },
+  {
+    name: "video_analyze_frame",
+    description: "Analyze a single image/frame with Ollama LLaVA",
+    inputSchema: {
+      type: "object",
+      properties: {
+        imagePath: {
+          type: "string",
+          description: "Path to the image file",
+        },
+        prompt: {
+          type: "string",
+          description: "What to analyze (default: 'Describe this image in detail')",
+        },
+        model: {
+          type: "string",
+          description: "Ollama model to use (default: 'llava')",
+        },
+      },
+      required: ["imagePath"],
+    },
+  },
 ];
 
 class GmailMCPServer {
@@ -927,6 +1021,15 @@ class GmailMCPServer {
             return await this.photosShareAlbum(args);
           case "photos_list_shared_albums":
             return await this.photosListSharedAlbums(args);
+          // Video analysis tools
+          case "video_get_info":
+            return await this.videoGetInfo(args);
+          case "video_extract_frame":
+            return await this.videoExtractFrame(args);
+          case "video_analyze":
+            return await this.videoAnalyze(args);
+          case "video_analyze_frame":
+            return await this.videoAnalyzeFrame(args);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -1868,6 +1971,242 @@ class GmailMCPServer {
       content: [{
         type: "text",
         text: JSON.stringify({ albums, nextPageToken: response.data.nextPageToken }, null, 2),
+      }],
+    };
+  }
+
+  // Video Analysis Methods (Ollama + FFmpeg)
+
+  private async downloadDriveFile(fileId: string): Promise<string> {
+    const tmpDir = "/tmp/gmail-mcp-videos";
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
+
+    // Get file metadata
+    const metadata = await this.drive!.files.get({
+      fileId,
+      fields: "name, mimeType",
+    });
+
+    const fileName = metadata.data.name || `video_${fileId}`;
+    const filePath = path.join(tmpDir, fileName);
+
+    // Download the file
+    const response = await this.drive!.files.get(
+      { fileId, alt: "media" },
+      { responseType: "stream" }
+    );
+
+    const dest = fs.createWriteStream(filePath);
+    await new Promise((resolve, reject) => {
+      (response.data as NodeJS.ReadableStream)
+        .pipe(dest)
+        .on("finish", resolve)
+        .on("error", reject);
+    });
+
+    return filePath;
+  }
+
+  private async videoGetInfo(args: Record<string, unknown>) {
+    let filePath = args.filePath as string | undefined;
+    const driveFileId = args.driveFileId as string | undefined;
+
+    if (driveFileId && !filePath) {
+      filePath = await this.downloadDriveFile(driveFileId);
+    }
+
+    if (!filePath) {
+      throw new Error("Either filePath or driveFileId is required");
+    }
+
+    // Use FFprobe to get video info
+    const { stdout } = await execAsync(
+      `ffprobe -v quiet -print_format json -show_format -show_streams "${filePath}"`
+    );
+
+    const info = JSON.parse(stdout);
+    const videoStream = info.streams?.find((s: any) => s.codec_type === "video");
+    const audioStream = info.streams?.find((s: any) => s.codec_type === "audio");
+
+    const result = {
+      filename: path.basename(filePath),
+      duration: info.format?.duration ? parseFloat(info.format.duration).toFixed(2) + "s" : "unknown",
+      size: info.format?.size ? (parseInt(info.format.size) / (1024 * 1024)).toFixed(2) + " MB" : "unknown",
+      bitrate: info.format?.bit_rate ? (parseInt(info.format.bit_rate) / 1000).toFixed(0) + " kbps" : "unknown",
+      video: videoStream ? {
+        codec: videoStream.codec_name,
+        width: videoStream.width,
+        height: videoStream.height,
+        fps: videoStream.r_frame_rate,
+      } : null,
+      audio: audioStream ? {
+        codec: audioStream.codec_name,
+        channels: audioStream.channels,
+        sampleRate: audioStream.sample_rate,
+      } : null,
+    };
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  }
+
+  private async videoExtractFrame(args: Record<string, unknown>) {
+    let filePath = args.filePath as string | undefined;
+    const driveFileId = args.driveFileId as string | undefined;
+    const timestamp = (args.timestamp as string) || "00:00:01";
+
+    if (driveFileId && !filePath) {
+      filePath = await this.downloadDriveFile(driveFileId);
+    }
+
+    if (!filePath) {
+      throw new Error("Either filePath or driveFileId is required");
+    }
+
+    const outputPath = `/tmp/gmail-mcp-videos/frame_${Date.now()}.jpg`;
+
+    await execAsync(
+      `ffmpeg -y -ss ${timestamp} -i "${filePath}" -vframes 1 -q:v 2 "${outputPath}"`
+    );
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          success: true,
+          framePath: outputPath,
+          timestamp,
+          message: "Frame extracted. Use video_analyze_frame to analyze it.",
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async videoAnalyzeFrame(args: Record<string, unknown>) {
+    const imagePath = args.imagePath as string;
+    const prompt = (args.prompt as string) || "Describe this image in detail";
+    const model = (args.model as string) || "llava";
+
+    if (!fs.existsSync(imagePath)) {
+      throw new Error(`Image not found: ${imagePath}`);
+    }
+
+    // Read image as base64
+    const imageBuffer = fs.readFileSync(imagePath);
+    const base64Image = imageBuffer.toString("base64");
+
+    // Call Ollama API
+    const response = await fetch("http://localhost:11434/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        prompt,
+        images: [base64Image],
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ollama error: ${response.status}`);
+    }
+
+    const result = await response.json() as { response: string };
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          model,
+          prompt,
+          analysis: result.response,
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async videoAnalyze(args: Record<string, unknown>) {
+    let filePath = args.filePath as string | undefined;
+    const driveFileId = args.driveFileId as string | undefined;
+    const prompt = (args.prompt as string) || "Describe what you see in this video frame";
+    const frameCount = (args.frameCount as number) || 3;
+    const model = (args.model as string) || "llava";
+
+    if (driveFileId && !filePath) {
+      filePath = await this.downloadDriveFile(driveFileId);
+    }
+
+    if (!filePath) {
+      throw new Error("Either filePath or driveFileId is required");
+    }
+
+    // Get video duration
+    const { stdout: durationOutput } = await execAsync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+    );
+    const duration = parseFloat(durationOutput.trim());
+
+    // Calculate timestamps for frames
+    const timestamps: number[] = [];
+    if (frameCount === 1) {
+      timestamps.push(duration / 2);
+    } else {
+      for (let i = 0; i < frameCount; i++) {
+        timestamps.push((duration / (frameCount + 1)) * (i + 1));
+      }
+    }
+
+    const analyses: Array<{ timestamp: string; analysis: string }> = [];
+
+    for (const ts of timestamps) {
+      const outputPath = `/tmp/gmail-mcp-videos/frame_${Date.now()}_${ts.toFixed(0)}.jpg`;
+      const tsStr = new Date(ts * 1000).toISOString().substr(11, 8);
+
+      // Extract frame
+      await execAsync(
+        `ffmpeg -y -ss ${ts} -i "${filePath}" -vframes 1 -q:v 2 "${outputPath}"`
+      );
+
+      // Analyze with Ollama
+      const imageBuffer = fs.readFileSync(outputPath);
+      const base64Image = imageBuffer.toString("base64");
+
+      const response = await fetch("http://localhost:11434/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          prompt: `${prompt} (Frame at ${tsStr})`,
+          images: [base64Image],
+          stream: false,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json() as { response: string };
+        analyses.push({
+          timestamp: tsStr,
+          analysis: result.response,
+        });
+      }
+
+      // Cleanup frame
+      fs.unlinkSync(outputPath);
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          video: path.basename(filePath),
+          duration: duration.toFixed(2) + "s",
+          model,
+          framesAnalyzed: analyses.length,
+          analyses,
+        }, null, 2),
       }],
     };
   }
