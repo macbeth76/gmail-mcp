@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 import * as http from "http";
+import { exec } from "child_process";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
@@ -141,7 +142,6 @@ To set up Gmail API access:
 
   server.listen(3000, () => {
     // Try to open browser
-    const { exec } = require("child_process");
     const platform = process.platform;
 
     if (platform === "darwin") {
