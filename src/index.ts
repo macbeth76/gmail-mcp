@@ -821,6 +821,48 @@ const tools: Tool[] = [
       required: ["imagePath"],
     },
   },
+  {
+    name: "video_transcribe",
+    description: "Transcribe speech from a video using Whisper (local, free)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Local path to the video file",
+        },
+        driveFileId: {
+          type: "string",
+          description: "Google Drive file ID (will download temporarily)",
+        },
+        language: {
+          type: "string",
+          description: "Language code (default: 'en' for English)",
+        },
+      },
+    },
+  },
+  {
+    name: "video_summarize",
+    description: "Transcribe video and summarize content using Ollama",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Local path to the video file",
+        },
+        driveFileId: {
+          type: "string",
+          description: "Google Drive file ID (will download temporarily)",
+        },
+        model: {
+          type: "string",
+          description: "Ollama model for summarization (default: 'llama3.2')",
+        },
+      },
+    },
+  },
 ];
 
 class GmailMCPServer {
@@ -1030,6 +1072,10 @@ class GmailMCPServer {
             return await this.videoAnalyze(args);
           case "video_analyze_frame":
             return await this.videoAnalyzeFrame(args);
+          case "video_transcribe":
+            return await this.videoTranscribe(args);
+          case "video_summarize":
+            return await this.videoSummarize(args);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -2206,6 +2252,119 @@ class GmailMCPServer {
           model,
           framesAnalyzed: analyses.length,
           analyses,
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async videoTranscribe(args: Record<string, unknown>) {
+    let filePath = args.filePath as string | undefined;
+    const driveFileId = args.driveFileId as string | undefined;
+    const language = (args.language as string) || "en";
+
+    if (driveFileId && !filePath) {
+      filePath = await this.downloadDriveFile(driveFileId);
+    }
+
+    if (!filePath) {
+      throw new Error("Either filePath or driveFileId is required");
+    }
+
+    const tmpDir = "/tmp/gmail-mcp-videos";
+    const audioPath = path.join(tmpDir, `audio_${Date.now()}.wav`);
+
+    // Extract audio from video
+    await execAsync(
+      `ffmpeg -y -i "${filePath}" -ar 16000 -ac 1 -c:a pcm_s16le "${audioPath}"`
+    );
+
+    // Transcribe with whisper-cli
+    const modelPath = path.join(process.env.HOME || "", ".whisper-models", "ggml-base.en.bin");
+    const { stdout } = await execAsync(
+      `whisper-cli -m "${modelPath}" -l ${language} -otxt -of /tmp/transcript "${audioPath}" 2>/dev/null`
+    );
+
+    // Read transcript
+    let transcript = "";
+    const transcriptPath = "/tmp/transcript.txt";
+    if (fs.existsSync(transcriptPath)) {
+      transcript = fs.readFileSync(transcriptPath, "utf-8").trim();
+      fs.unlinkSync(transcriptPath);
+    }
+
+    // Cleanup audio
+    if (fs.existsSync(audioPath)) {
+      fs.unlinkSync(audioPath);
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          video: path.basename(filePath),
+          language,
+          transcript,
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async videoSummarize(args: Record<string, unknown>) {
+    let filePath = args.filePath as string | undefined;
+    const driveFileId = args.driveFileId as string | undefined;
+    const model = (args.model as string) || "llama3.2";
+
+    if (driveFileId && !filePath) {
+      filePath = await this.downloadDriveFile(driveFileId);
+    }
+
+    if (!filePath) {
+      throw new Error("Either filePath or driveFileId is required");
+    }
+
+    // First transcribe
+    const transcribeResult = await this.videoTranscribe({ filePath });
+    const transcriptData = JSON.parse(
+      (transcribeResult.content[0] as { text: string }).text
+    );
+
+    if (!transcriptData.transcript) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            video: path.basename(filePath),
+            error: "No speech detected in video",
+          }, null, 2),
+        }],
+      };
+    }
+
+    // Summarize with Ollama
+    const response = await fetch("http://localhost:11434/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        prompt: `Summarize the following video transcript in a few sentences. What is the video about?\n\nTranscript:\n${transcriptData.transcript}`,
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ollama error: ${response.status}`);
+    }
+
+    const result = await response.json() as { response: string };
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          video: path.basename(filePath),
+          transcript: transcriptData.transcript,
+          summary: result.response,
+          model,
         }, null, 2),
       }],
     };
