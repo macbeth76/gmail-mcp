@@ -863,6 +863,105 @@ const tools: Tool[] = [
       },
     },
   },
+  // AI Auto-Labeling Tools
+  {
+    name: "gmail_suggest_labels",
+    description: "Analyze an email using AI and suggest appropriate labels (does not apply them)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to analyze",
+        },
+        customLabels: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of custom label names to consider (optional, will also suggest creating new ones)",
+        },
+        model: {
+          type: "string",
+          description: "Ollama model to use (default: 'llama3.2')",
+        },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
+    name: "gmail_auto_label",
+    description: "Analyze an email using AI and automatically apply suggested labels",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to auto-label",
+        },
+        customLabels: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of custom label names to consider (optional)",
+        },
+        createMissing: {
+          type: "boolean",
+          description: "Create labels if they don't exist (default: false)",
+        },
+        model: {
+          type: "string",
+          description: "Ollama model to use (default: 'llama3.2')",
+        },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
+    name: "gmail_bulk_auto_label",
+    description: "Auto-label multiple emails using AI analysis",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Gmail search query to find emails to label (e.g., 'is:unread', 'from:newsletter@')",
+        },
+        maxMessages: {
+          type: "number",
+          description: "Maximum number of messages to process (default: 10, max: 50)",
+        },
+        customLabels: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of custom label names to consider",
+        },
+        createMissing: {
+          type: "boolean",
+          description: "Create labels if they don't exist (default: false)",
+        },
+        model: {
+          type: "string",
+          description: "Ollama model to use (default: 'llama3.2')",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "gmail_create_label_rules",
+    description: "Create AI-powered labeling rules based on sender patterns",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sampleSize: {
+          type: "number",
+          description: "Number of recent emails to analyze for patterns (default: 50)",
+        },
+        model: {
+          type: "string",
+          description: "Ollama model to use (default: 'llama3.2')",
+        },
+      },
+    },
+  },
 ];
 
 class GmailMCPServer {
@@ -1076,6 +1175,15 @@ class GmailMCPServer {
             return await this.videoTranscribe(args);
           case "video_summarize":
             return await this.videoSummarize(args);
+          // AI Auto-Labeling
+          case "gmail_suggest_labels":
+            return await this.suggestLabels(args);
+          case "gmail_auto_label":
+            return await this.autoLabel(args);
+          case "gmail_bulk_auto_label":
+            return await this.bulkAutoLabel(args);
+          case "gmail_create_label_rules":
+            return await this.createLabelRules(args);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -2365,6 +2473,361 @@ class GmailMCPServer {
           transcript: transcriptData.transcript,
           summary: result.response,
           model,
+        }, null, 2),
+      }],
+    };
+  }
+
+  // AI Auto-Labeling Methods
+
+  private async analyzeEmailForLabels(
+    messageId: string,
+    customLabels: string[],
+    model: string
+  ): Promise<{ suggestedLabels: string[]; reasoning: string; category: string }> {
+    // Get the email content
+    const response = await this.gmail!.users.messages.get({
+      userId: "me",
+      id: messageId,
+      format: "full",
+    });
+
+    const message = response.data;
+    const from = this.getHeader(message.payload?.headers, "From");
+    const subject = this.getHeader(message.payload?.headers, "Subject");
+    const body = this.getMessageBody(message.payload);
+
+    // Get existing labels for context
+    const labelsResponse = await this.gmail!.users.labels.list({ userId: "me" });
+    const existingLabels = labelsResponse.data.labels
+      ?.filter(l => l.type === "user")
+      ?.map(l => l.name) || [];
+
+    const allLabels = [...new Set([...existingLabels, ...customLabels])];
+
+    // Build prompt for AI
+    const prompt = `Analyze this email and suggest appropriate labels for organization.
+
+EMAIL:
+From: ${from}
+Subject: ${subject}
+Body (first 500 chars): ${body.substring(0, 500)}
+
+AVAILABLE LABELS: ${allLabels.length > 0 ? allLabels.join(", ") : "None yet"}
+
+TASK:
+1. Categorize this email (e.g., Newsletter, Receipt, Work, Personal, Social, Finance, Travel, Shopping, Notification, Spam, Important)
+2. Suggest 1-3 labels from the available labels, OR suggest new label names if none fit
+3. Provide brief reasoning
+
+Respond in JSON format:
+{
+  "category": "primary category",
+  "suggestedLabels": ["label1", "label2"],
+  "reasoning": "brief explanation"
+}`;
+
+    const aiResponse = await fetch("http://localhost:11434/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        prompt,
+        stream: false,
+      }),
+    });
+
+    if (!aiResponse.ok) {
+      throw new Error(`Ollama error: ${aiResponse.status}. Is Ollama running?`);
+    }
+
+    const result = await aiResponse.json() as { response: string };
+
+    // Parse the JSON response
+    try {
+      const jsonMatch = result.response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+    } catch (e) {
+      // If parsing fails, extract what we can
+    }
+
+    return {
+      suggestedLabels: [],
+      reasoning: result.response,
+      category: "Unknown",
+    };
+  }
+
+  private async suggestLabels(args: Record<string, unknown>) {
+    const messageId = args.messageId as string;
+    const customLabels = (args.customLabels as string[]) || [];
+    const model = (args.model as string) || "llama3.2";
+
+    const analysis = await this.analyzeEmailForLabels(messageId, customLabels, model);
+
+    // Get email info for context
+    const msgResponse = await this.gmail!.users.messages.get({
+      userId: "me",
+      id: messageId,
+      format: "metadata",
+      metadataHeaders: ["From", "Subject"],
+    });
+    const from = this.getHeader(msgResponse.data.payload?.headers, "From");
+    const subject = this.getHeader(msgResponse.data.payload?.headers, "Subject");
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          messageId,
+          from,
+          subject,
+          category: analysis.category,
+          suggestedLabels: analysis.suggestedLabels,
+          reasoning: analysis.reasoning,
+          note: "Use gmail_auto_label to apply these labels",
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async autoLabel(args: Record<string, unknown>) {
+    const messageId = args.messageId as string;
+    const customLabels = (args.customLabels as string[]) || [];
+    const createMissing = (args.createMissing as boolean) || false;
+    const model = (args.model as string) || "llama3.2";
+
+    // Get AI suggestions
+    const analysis = await this.analyzeEmailForLabels(messageId, customLabels, model);
+
+    // Get existing labels
+    const labelsResponse = await this.gmail!.users.labels.list({ userId: "me" });
+    const existingLabels = labelsResponse.data.labels || [];
+    const labelMap = new Map(existingLabels.map(l => [l.name?.toLowerCase(), l.id]));
+
+    const appliedLabels: string[] = [];
+    const createdLabels: string[] = [];
+    const skippedLabels: string[] = [];
+
+    for (const labelName of analysis.suggestedLabels) {
+      const labelId = labelMap.get(labelName.toLowerCase());
+
+      if (labelId) {
+        // Apply existing label
+        await this.gmail!.users.messages.modify({
+          userId: "me",
+          id: messageId,
+          requestBody: { addLabelIds: [labelId] },
+        });
+        appliedLabels.push(labelName);
+      } else if (createMissing) {
+        // Create and apply new label
+        const newLabel = await this.gmail!.users.labels.create({
+          userId: "me",
+          requestBody: { name: labelName },
+        });
+        await this.gmail!.users.messages.modify({
+          userId: "me",
+          id: messageId,
+          requestBody: { addLabelIds: [newLabel.data.id!] },
+        });
+        appliedLabels.push(labelName);
+        createdLabels.push(labelName);
+      } else {
+        skippedLabels.push(labelName);
+      }
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          messageId,
+          category: analysis.category,
+          appliedLabels,
+          createdLabels: createdLabels.length > 0 ? createdLabels : undefined,
+          skippedLabels: skippedLabels.length > 0 ? skippedLabels : undefined,
+          reasoning: analysis.reasoning,
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async bulkAutoLabel(args: Record<string, unknown>) {
+    const query = args.query as string;
+    const maxMessages = Math.min((args.maxMessages as number) || 10, 50);
+    const customLabels = (args.customLabels as string[]) || [];
+    const createMissing = (args.createMissing as boolean) || false;
+    const model = (args.model as string) || "llama3.2";
+
+    // Find messages matching query
+    const searchResponse = await this.gmail!.users.messages.list({
+      userId: "me",
+      q: query,
+      maxResults: maxMessages,
+    });
+
+    const messages = searchResponse.data.messages || [];
+    const results: Array<{
+      messageId: string;
+      subject: string;
+      category: string;
+      appliedLabels: string[];
+    }> = [];
+
+    for (const msg of messages) {
+      try {
+        const labelResult = await this.autoLabel({
+          messageId: msg.id!,
+          customLabels,
+          createMissing,
+          model,
+        });
+
+        const resultData = JSON.parse(
+          (labelResult.content[0] as { text: string }).text
+        );
+
+        // Get subject for display
+        const msgDetails = await this.gmail!.users.messages.get({
+          userId: "me",
+          id: msg.id!,
+          format: "metadata",
+          metadataHeaders: ["Subject"],
+        });
+
+        results.push({
+          messageId: msg.id!,
+          subject: this.getHeader(msgDetails.data.payload?.headers, "Subject"),
+          category: resultData.category,
+          appliedLabels: resultData.appliedLabels,
+        });
+      } catch (error) {
+        results.push({
+          messageId: msg.id!,
+          subject: "Error processing",
+          category: "Error",
+          appliedLabels: [],
+        });
+      }
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          query,
+          processedCount: results.length,
+          results,
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async createLabelRules(args: Record<string, unknown>) {
+    const sampleSize = (args.sampleSize as number) || 50;
+    const model = (args.model as string) || "llama3.2";
+
+    // Get recent emails
+    const response = await this.gmail!.users.messages.list({
+      userId: "me",
+      maxResults: sampleSize,
+    });
+
+    const messages = response.data.messages || [];
+    const senderPatterns: Map<string, { count: number; subjects: string[] }> = new Map();
+
+    // Analyze sender patterns
+    for (const msg of messages) {
+      const details = await this.gmail!.users.messages.get({
+        userId: "me",
+        id: msg.id!,
+        format: "metadata",
+        metadataHeaders: ["From", "Subject"],
+      });
+
+      const from = this.getHeader(details.data.payload?.headers, "From");
+      const subject = this.getHeader(details.data.payload?.headers, "Subject");
+
+      // Extract domain from email
+      const emailMatch = from.match(/<(.+?)>/) || from.match(/(\S+@\S+)/);
+      const email = emailMatch ? emailMatch[1] : from;
+      const domain = email.split("@")[1] || email;
+
+      if (!senderPatterns.has(domain)) {
+        senderPatterns.set(domain, { count: 0, subjects: [] });
+      }
+      const pattern = senderPatterns.get(domain)!;
+      pattern.count++;
+      if (pattern.subjects.length < 3) {
+        pattern.subjects.push(subject);
+      }
+    }
+
+    // Find frequent senders
+    const frequentSenders = Array.from(senderPatterns.entries())
+      .filter(([_, data]) => data.count >= 2)
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 20);
+
+    // Use AI to suggest labels for frequent senders
+    const prompt = `Based on these frequent email senders and sample subjects, suggest label rules:
+
+${frequentSenders.map(([domain, data]) =>
+  `- ${domain} (${data.count} emails): ${data.subjects.join(", ")}`
+).join("\n")}
+
+For each sender pattern, suggest:
+1. A label name
+2. Whether it's likely: Newsletter, Notification, Receipt, Social, Work, Personal, Spam
+
+Respond in JSON format:
+{
+  "rules": [
+    { "pattern": "domain or sender pattern", "label": "suggested label", "type": "category" }
+  ]
+}`;
+
+    const aiResponse = await fetch("http://localhost:11434/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        prompt,
+        stream: false,
+      }),
+    });
+
+    if (!aiResponse.ok) {
+      throw new Error(`Ollama error: ${aiResponse.status}`);
+    }
+
+    const result = await aiResponse.json() as { response: string };
+
+    let rules = [];
+    try {
+      const jsonMatch = result.response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        rules = JSON.parse(jsonMatch[0]).rules;
+      }
+    } catch (e) {
+      // If parsing fails, return raw analysis
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          analyzedEmails: messages.length,
+          frequentSenders: frequentSenders.map(([domain, data]) => ({
+            domain,
+            count: data.count,
+            sampleSubjects: data.subjects,
+          })),
+          suggestedRules: rules,
+          note: "Use gmail_auto_label with customLabels to apply these patterns",
         }, null, 2),
       }],
     };
