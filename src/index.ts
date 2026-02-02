@@ -962,6 +962,80 @@ const tools: Tool[] = [
       },
     },
   },
+  // Unsubscribe Tools
+  {
+    name: "gmail_find_unsubscribe",
+    description: "Find the unsubscribe link in an email (checks List-Unsubscribe header and email body)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to check for unsubscribe link",
+        },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
+    name: "gmail_list_subscriptions",
+    description: "List emails that have unsubscribe options (newsletters, marketing emails)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        maxResults: {
+          type: "number",
+          description: "Maximum number of emails to scan (default: 50)",
+        },
+        query: {
+          type: "string",
+          description: "Additional Gmail query to filter (default: scans recent emails)",
+        },
+      },
+    },
+  },
+  {
+    name: "gmail_unsubscribe",
+    description: "Attempt to unsubscribe from an email by visiting the unsubscribe link",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to unsubscribe from",
+        },
+        method: {
+          type: "string",
+          enum: ["link", "mailto", "both"],
+          description: "Unsubscribe method: 'link' (visit URL), 'mailto' (send email), 'both' (default: 'link')",
+        },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
+    name: "gmail_bulk_unsubscribe",
+    description: "Find and unsubscribe from multiple newsletters/marketing emails",
+    inputSchema: {
+      type: "object",
+      properties: {
+        senders: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of sender email addresses or domains to unsubscribe from",
+        },
+        dryRun: {
+          type: "boolean",
+          description: "If true, only list what would be unsubscribed (default: true)",
+        },
+        trashAfter: {
+          type: "boolean",
+          description: "Trash emails after unsubscribing (default: false)",
+        },
+      },
+      required: ["senders"],
+    },
+  },
 ];
 
 class GmailMCPServer {
@@ -1184,6 +1258,15 @@ class GmailMCPServer {
             return await this.bulkAutoLabel(args);
           case "gmail_create_label_rules":
             return await this.createLabelRules(args);
+          // Unsubscribe tools
+          case "gmail_find_unsubscribe":
+            return await this.findUnsubscribe(args);
+          case "gmail_list_subscriptions":
+            return await this.listSubscriptions(args);
+          case "gmail_unsubscribe":
+            return await this.unsubscribe(args);
+          case "gmail_bulk_unsubscribe":
+            return await this.bulkUnsubscribe(args);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -2828,6 +2911,434 @@ Respond in JSON format:
           })),
           suggestedRules: rules,
           note: "Use gmail_auto_label with customLabels to apply these patterns",
+        }, null, 2),
+      }],
+    };
+  }
+
+  // Unsubscribe Methods
+
+  private extractUnsubscribeLinks(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, body: string): {
+    headerLink: string | null;
+    headerMailto: string | null;
+    bodyLinks: string[];
+  } {
+    const result = {
+      headerLink: null as string | null,
+      headerMailto: null as string | null,
+      bodyLinks: [] as string[],
+    };
+
+    // Check List-Unsubscribe header (RFC 2369)
+    const listUnsubscribe = this.getHeader(headers, "List-Unsubscribe");
+    if (listUnsubscribe) {
+      // Extract HTTP URL
+      const httpMatch = listUnsubscribe.match(/<(https?:\/\/[^>]+)>/);
+      if (httpMatch) {
+        result.headerLink = httpMatch[1];
+      }
+      // Extract mailto
+      const mailtoMatch = listUnsubscribe.match(/<(mailto:[^>]+)>/);
+      if (mailtoMatch) {
+        result.headerMailto = mailtoMatch[1];
+      }
+    }
+
+    // Search body for unsubscribe links
+    const unsubscribePatterns = [
+      /https?:\/\/[^\s"'<>]+unsubscribe[^\s"'<>]*/gi,
+      /https?:\/\/[^\s"'<>]+opt[\-_]?out[^\s"'<>]*/gi,
+      /https?:\/\/[^\s"'<>]+remove[^\s"'<>]*/gi,
+      /https?:\/\/[^\s"'<>]+preferences[^\s"'<>]*/gi,
+    ];
+
+    for (const pattern of unsubscribePatterns) {
+      const matches = body.match(pattern);
+      if (matches) {
+        result.bodyLinks.push(...matches);
+      }
+    }
+
+    // Deduplicate body links
+    result.bodyLinks = [...new Set(result.bodyLinks)];
+
+    return result;
+  }
+
+  private async findUnsubscribe(args: Record<string, unknown>) {
+    const messageId = args.messageId as string;
+
+    const response = await this.gmail!.users.messages.get({
+      userId: "me",
+      id: messageId,
+      format: "full",
+    });
+
+    const message = response.data;
+    const from = this.getHeader(message.payload?.headers, "From");
+    const subject = this.getHeader(message.payload?.headers, "Subject");
+    const body = this.getMessageBody(message.payload);
+
+    const unsubLinks = this.extractUnsubscribeLinks(message.payload?.headers, body);
+
+    const hasUnsubscribe = !!(unsubLinks.headerLink || unsubLinks.headerMailto || unsubLinks.bodyLinks.length > 0);
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          messageId,
+          from,
+          subject,
+          hasUnsubscribe,
+          unsubscribeOptions: {
+            headerLink: unsubLinks.headerLink,
+            headerMailto: unsubLinks.headerMailto,
+            bodyLinks: unsubLinks.bodyLinks.slice(0, 5), // Limit to 5
+          },
+          recommendation: unsubLinks.headerLink
+            ? "Use headerLink (most reliable)"
+            : unsubLinks.headerMailto
+              ? "Use headerMailto"
+              : unsubLinks.bodyLinks.length > 0
+                ? "Try bodyLinks (less reliable)"
+                : "No unsubscribe option found",
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async listSubscriptions(args: Record<string, unknown>) {
+    const maxResults = (args.maxResults as number) || 50;
+    const additionalQuery = args.query as string | undefined;
+
+    // Search for emails likely to have unsubscribe options
+    const query = additionalQuery
+      ? additionalQuery
+      : "unsubscribe OR list-unsubscribe OR opt-out";
+
+    const response = await this.gmail!.users.messages.list({
+      userId: "me",
+      maxResults,
+      q: query,
+    });
+
+    const messages = response.data.messages || [];
+    const subscriptions: Map<string, {
+      sender: string;
+      domain: string;
+      count: number;
+      latestSubject: string;
+      latestMessageId: string;
+      hasHeaderUnsubscribe: boolean;
+    }> = new Map();
+
+    for (const msg of messages.slice(0, maxResults)) {
+      try {
+        const details = await this.gmail!.users.messages.get({
+          userId: "me",
+          id: msg.id!,
+          format: "full",
+        });
+
+        const from = this.getHeader(details.data.payload?.headers, "From");
+        const subject = this.getHeader(details.data.payload?.headers, "Subject");
+        const listUnsubscribe = this.getHeader(details.data.payload?.headers, "List-Unsubscribe");
+
+        // Extract email/domain
+        const emailMatch = from.match(/<(.+?)>/) || from.match(/(\S+@\S+)/);
+        const email = emailMatch ? emailMatch[1].toLowerCase() : from.toLowerCase();
+        const domain = email.split("@")[1] || email;
+
+        if (!subscriptions.has(domain)) {
+          subscriptions.set(domain, {
+            sender: from,
+            domain,
+            count: 0,
+            latestSubject: subject,
+            latestMessageId: msg.id!,
+            hasHeaderUnsubscribe: !!listUnsubscribe,
+          });
+        }
+
+        const sub = subscriptions.get(domain)!;
+        sub.count++;
+        if (!sub.hasHeaderUnsubscribe && listUnsubscribe) {
+          sub.hasHeaderUnsubscribe = true;
+          sub.latestMessageId = msg.id!;
+        }
+      } catch (e) {
+        // Skip errors
+      }
+    }
+
+    // Sort by count (most emails first)
+    const sortedSubs = Array.from(subscriptions.values())
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          scannedEmails: messages.length,
+          subscriptionsFound: sortedSubs.length,
+          subscriptions: sortedSubs.map(s => ({
+            sender: s.sender,
+            domain: s.domain,
+            emailCount: s.count,
+            latestSubject: s.latestSubject,
+            messageId: s.latestMessageId,
+            easyUnsubscribe: s.hasHeaderUnsubscribe,
+          })),
+          tip: "Use gmail_unsubscribe with a messageId to unsubscribe",
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async unsubscribe(args: Record<string, unknown>) {
+    const messageId = args.messageId as string;
+    const method = (args.method as string) || "link";
+
+    // Get unsubscribe info
+    const response = await this.gmail!.users.messages.get({
+      userId: "me",
+      id: messageId,
+      format: "full",
+    });
+
+    const message = response.data;
+    const from = this.getHeader(message.payload?.headers, "From");
+    const body = this.getMessageBody(message.payload);
+    const unsubLinks = this.extractUnsubscribeLinks(message.payload?.headers, body);
+
+    const results: {
+      method: string;
+      success: boolean;
+      url?: string;
+      message: string;
+    }[] = [];
+
+    // Try HTTP link unsubscribe
+    if ((method === "link" || method === "both") && unsubLinks.headerLink) {
+      try {
+        const response = await fetch(unsubLinks.headerLink, {
+          method: "GET",
+          redirect: "follow",
+          headers: {
+            "User-Agent": "Mozilla/5.0 (compatible; GmailMCP/1.0)",
+          },
+        });
+        results.push({
+          method: "headerLink",
+          success: response.ok,
+          url: unsubLinks.headerLink,
+          message: response.ok
+            ? `Visited unsubscribe link (status: ${response.status})`
+            : `Failed to visit link (status: ${response.status})`,
+        });
+      } catch (error) {
+        results.push({
+          method: "headerLink",
+          success: false,
+          url: unsubLinks.headerLink,
+          message: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }
+
+    // Try mailto unsubscribe
+    if ((method === "mailto" || method === "both") && unsubLinks.headerMailto) {
+      try {
+        // Parse mailto link
+        const mailto = unsubLinks.headerMailto.replace("mailto:", "");
+        const [email, params] = mailto.split("?");
+        let subject = "Unsubscribe";
+        let body = "Please unsubscribe me from this mailing list.";
+
+        if (params) {
+          const searchParams = new URLSearchParams(params);
+          subject = searchParams.get("subject") || subject;
+          body = searchParams.get("body") || body;
+        }
+
+        // Send unsubscribe email
+        const raw = this.createRawMessage(email, subject, body);
+        await this.gmail!.users.messages.send({
+          userId: "me",
+          requestBody: { raw },
+        });
+
+        results.push({
+          method: "mailto",
+          success: true,
+          url: unsubLinks.headerMailto,
+          message: `Sent unsubscribe email to ${email}`,
+        });
+      } catch (error) {
+        results.push({
+          method: "mailto",
+          success: false,
+          url: unsubLinks.headerMailto,
+          message: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }
+
+    // Try body links if no header options
+    if (results.length === 0 && unsubLinks.bodyLinks.length > 0) {
+      const link = unsubLinks.bodyLinks[0];
+      try {
+        const response = await fetch(link, {
+          method: "GET",
+          redirect: "follow",
+          headers: {
+            "User-Agent": "Mozilla/5.0 (compatible; GmailMCP/1.0)",
+          },
+        });
+        results.push({
+          method: "bodyLink",
+          success: response.ok,
+          url: link,
+          message: response.ok
+            ? `Visited unsubscribe link from email body (status: ${response.status})`
+            : `Failed to visit link (status: ${response.status})`,
+        });
+      } catch (error) {
+        results.push({
+          method: "bodyLink",
+          success: false,
+          url: link,
+          message: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }
+
+    if (results.length === 0) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            messageId,
+            from,
+            success: false,
+            message: "No unsubscribe option found for this email",
+          }, null, 2),
+        }],
+      };
+    }
+
+    const anySuccess = results.some(r => r.success);
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          messageId,
+          from,
+          success: anySuccess,
+          results,
+          note: anySuccess
+            ? "Unsubscribe request sent. It may take a few days to take effect."
+            : "Unsubscribe attempt failed. You may need to unsubscribe manually.",
+        }, null, 2),
+      }],
+    };
+  }
+
+  private async bulkUnsubscribe(args: Record<string, unknown>) {
+    const senders = args.senders as string[];
+    const dryRun = args.dryRun !== false; // Default true
+    const trashAfter = (args.trashAfter as boolean) || false;
+
+    const results: Array<{
+      sender: string;
+      messagesFound: number;
+      unsubscribed: boolean;
+      trashed: boolean;
+      error?: string;
+    }> = [];
+
+    for (const sender of senders) {
+      // Find emails from this sender
+      const query = sender.includes("@") ? `from:${sender}` : `from:@${sender}`;
+      const response = await this.gmail!.users.messages.list({
+        userId: "me",
+        q: query,
+        maxResults: 10,
+      });
+
+      const messages = response.data.messages || [];
+
+      if (messages.length === 0) {
+        results.push({
+          sender,
+          messagesFound: 0,
+          unsubscribed: false,
+          trashed: false,
+          error: "No emails found from this sender",
+        });
+        continue;
+      }
+
+      const result: typeof results[0] = {
+        sender,
+        messagesFound: messages.length,
+        unsubscribed: false,
+        trashed: false,
+      };
+
+      if (dryRun) {
+        result.unsubscribed = false;
+        results.push(result);
+        continue;
+      }
+
+      // Try to unsubscribe using the first message
+      try {
+        const unsubResult = await this.unsubscribe({ messageId: messages[0].id! });
+        const unsubData = JSON.parse(
+          (unsubResult.content[0] as { text: string }).text
+        );
+        result.unsubscribed = unsubData.success;
+      } catch (error) {
+        result.error = error instanceof Error ? error.message : String(error);
+      }
+
+      // Trash messages if requested
+      if (trashAfter && result.unsubscribed) {
+        try {
+          for (const msg of messages) {
+            await this.gmail!.users.messages.trash({
+              userId: "me",
+              id: msg.id!,
+            });
+          }
+          result.trashed = true;
+        } catch (error) {
+          // Continue even if trash fails
+        }
+      }
+
+      results.push(result);
+    }
+
+    const summary = {
+      totalSenders: senders.length,
+      dryRun,
+      unsubscribed: results.filter(r => r.unsubscribed).length,
+      trashed: results.filter(r => r.trashed).length,
+    };
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          summary,
+          results,
+          tip: dryRun
+            ? "Set dryRun: false to actually unsubscribe"
+            : "Unsubscribe requests sent. Effects may take a few days.",
         }, null, 2),
       }],
     };
