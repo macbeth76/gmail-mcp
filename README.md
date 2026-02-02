@@ -34,7 +34,7 @@ A Model Context Protocol (MCP) server for Gmail, Google Photos, and Video analys
 
 ## Features
 
-### Gmail (36 tools)
+### Gmail (40 tools)
 - List and search emails with Gmail query syntax
 - Read email content with attachments
 - Send new emails, replies, and forwards
@@ -45,6 +45,7 @@ A Model Context Protocol (MCP) server for Gmail, Google Photos, and Video analys
 - Batch operations for bulk actions
 - Download attachments
 - **AI-powered auto-labeling** using Ollama
+- **Unsubscribe management** - find and unsubscribe from newsletters
 
 ### Google Photos (9 tools)
 - List and search photos/videos
@@ -142,7 +143,7 @@ Add to your Claude MCP configuration:
 }
 ```
 
-## Available Tools (51 total)
+## Available Tools (55 total)
 
 ### Gmail Messages
 
@@ -270,6 +271,43 @@ gmail_bulk_auto_label({
 // Analyze sender patterns for rule suggestions
 gmail_create_label_rules({
   sampleSize: 100
+})
+```
+
+### Unsubscribe Management
+
+| Tool | Description |
+|------|-------------|
+| `gmail_find_unsubscribe` | Find unsubscribe link in an email (header + body) |
+| `gmail_list_subscriptions` | List all newsletters/marketing emails with unsubscribe options |
+| `gmail_unsubscribe` | Unsubscribe from an email (via link or mailto) |
+| `gmail_bulk_unsubscribe` | Unsubscribe from multiple senders at once |
+
+**Example usage:**
+
+```javascript
+// Find subscriptions in your inbox
+gmail_list_subscriptions({
+  maxResults: 100
+})
+// Returns: list of senders with email counts and unsubscribe availability
+
+// Unsubscribe from a specific email
+gmail_unsubscribe({
+  messageId: "abc123"
+})
+
+// Bulk unsubscribe (dry run first)
+gmail_bulk_unsubscribe({
+  senders: ["newsletter@company.com", "marketing.com"],
+  dryRun: true  // Set to false to actually unsubscribe
+})
+
+// Unsubscribe and trash old emails
+gmail_bulk_unsubscribe({
+  senders: ["spam@example.com"],
+  dryRun: false,
+  trashAfter: true
 })
 ```
 
