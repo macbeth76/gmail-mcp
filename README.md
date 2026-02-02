@@ -34,7 +34,7 @@ A Model Context Protocol (MCP) server for Gmail, Google Photos, and Video analys
 
 ## Features
 
-### Gmail (32 tools)
+### Gmail (36 tools)
 - List and search emails with Gmail query syntax
 - Read email content with attachments
 - Send new emails, replies, and forwards
@@ -44,6 +44,7 @@ A Model Context Protocol (MCP) server for Gmail, Google Photos, and Video analys
 - Archive and trash messages
 - Batch operations for bulk actions
 - Download attachments
+- **AI-powered auto-labeling** using Ollama
 
 ### Google Photos (9 tools)
 - List and search photos/videos
@@ -141,7 +142,7 @@ Add to your Claude MCP configuration:
 }
 ```
 
-## Available Tools (47 total)
+## Available Tools (51 total)
 
 ### Gmail Messages
 
@@ -234,6 +235,43 @@ Add to your Claude MCP configuration:
 | `video_analyze_frame` | Analyze a specific frame with custom prompt |
 | `video_transcribe` | Transcribe audio using Whisper-cpp |
 | `video_summarize` | Generate summary using transcription + AI |
+
+### AI Auto-Labeling
+
+| Tool | Description |
+|------|-------------|
+| `gmail_suggest_labels` | Analyze email with AI and suggest labels (read-only) |
+| `gmail_auto_label` | Analyze email and automatically apply suggested labels |
+| `gmail_bulk_auto_label` | Auto-label multiple emails matching a search query |
+| `gmail_create_label_rules` | Analyze sender patterns and suggest labeling rules |
+
+**Example usage:**
+
+```javascript
+// Get label suggestions for an email
+gmail_suggest_labels({
+  messageId: "abc123",
+  customLabels: ["Work", "Personal", "Finance", "Travel"]
+})
+
+// Auto-label an email (creates missing labels)
+gmail_auto_label({
+  messageId: "abc123",
+  createMissing: true
+})
+
+// Bulk auto-label all unread newsletters
+gmail_bulk_auto_label({
+  query: "is:unread from:newsletter",
+  maxMessages: 20,
+  customLabels: ["Newsletter", "Promotions"]
+})
+
+// Analyze sender patterns for rule suggestions
+gmail_create_label_rules({
+  sampleSize: 100
+})
+```
 
 ## Environment Variables
 
